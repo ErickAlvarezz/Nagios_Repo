@@ -1,0 +1,120 @@
+---
+- name: Install Nagios Core on Ubuntu
+  hosts: server1_lab, server2_lab
+  become: true
+
+  vars:
+    nagios_version: "4.4.14"
+    nagios_plugins_version: "2.4.9"
+    nagios_core_url: "https://assets.nagios.com/downloads/nagioscore/releases/nagios-{{ nagios_version }}.tar.gz"
+    nagios_plugins_url: "https://nagios-plugins.org/download/nagios-plugins-{{ nagios_plugins_version }}.tar.gz"
+    nagios_src_dir: "/usr/local/src"
+
+  tasks:
+    - name: Create nagios user
+      ansible.builtin.user:
+        name: nagios
+        shell: /bin/bash
+        create_home: true
+
+    - name: Create nagcmd group
+      ansible.builtin.group:
+        name: nagcmd
+        state: present
+
+    - name: Add nagios user to nagcmd group
+      ansible.builtin.user:
+        name: nagios
+        groups: nagcmd
+        append: true
+
+    - name: Ensure source directory exists
+      ansible.builtin.file:
+        path: "{{ nagios_src_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download Nagios Core source
+      ansible.builtin.get_url:
+        url: "{{ nagios_core_url }}"
+        dest: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}.tar.gz"
+        mode: "0644"
+
+    - name: Extract Nagios Core source
+      ansible.builtin.unarchive:
+        src: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}.tar.gz"
+        dest: "{{ nagios_src_dir }}"
+        remote_src: true
+        creates: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}/configure"
+
+    - name: Configure Nagios Core build
+      ansible.builtin.command:
+        cmd: ./configure --with-nagios-group=nagios --with-command-group=nagcmd
+        chdir: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}"
+        creates: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}/Makefile"
+
+    - name: Compile Nagios Core (make all)
+      ansible.builtin.command:
+        cmd: make all
+        chdir: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}"
+        creates: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}/base/nagios"
+
+    - name: Install Nagios Core binaries
+      ansible.builtin.command:
+        cmd: make install
+        chdir: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}"
+        creates: /usr/local/nagios/bin/nagios
+
+    - name: Install Nagios init script
+      ansible.builtin.command:
+        cmd: make install-init
+        chdir: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}"
+        creates: /etc/init.d/nagios
+
+    - name: Install command mode
+      ansible.builtin.command:
+        cmd: make install-commandmode
+        chdir: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}"
+        creates: /usr/local/nagios/var/rw
+
+    - name: Install sample config files
+      ansible.builtin.command:
+        cmd: make install-config
+        chdir: "{{ nagios_src_dir }}/nagios-{{ nagios_version }}"
+        creates: /usr/local/nagios/etc/nagios.cfg
+
+    - name: Download Nagios Plugins source
+      ansible.builtin.get_url:
+        url: "{{ nagios_plugins_url }}"
+        dest: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}.tar.gz"
+        mode: "0644"
+
+    - name: Extract Nagios Plugins source
+      ansible.builtin.unarchive:
+        src: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}.tar.gz"
+        dest: "{{ nagios_src_dir }}"
+        remote_src: true
+        creates: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}/configure"
+
+    - name: Configure Nagios Plugins build
+      ansible.builtin.command:
+        cmd: ./configure --with-nagios-user=nagios --with-nagios-group=nagios
+        chdir: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}"
+        creates: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}/Makefile"
+
+    - name: Compile Nagios Plugins
+      ansible.builtin.command:
+        cmd: make
+        chdir: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}"
+        creates: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}/plugins/check_ping"
+
+    - name: Install Nagios Plugins
+      ansible.builtin.command:
+        cmd: make install
+        chdir: "{{ nagios_src_dir }}/nagios-plugins-{{ nagios_plugins_version }}"
+        creates: /usr/local/nagios/libexec/check_ping
+
+    - name: Enable nagios service
+      ansible.builtin.service:
+        name: nagios
+        enabled: true
